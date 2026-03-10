@@ -1,0 +1,36 @@
+name: B3 Order Fulfiller
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'  # Every 4 hours
+  workflow_dispatch:
+
+jobs:
+  fulfill-orders:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests
+      - name: Restore DB
+        uses: actions/cache@v4
+        with:
+          path: dropship.db
+          key: dropship-db-latest
+          restore-keys: dropship-db-
+      - name: Fulfill Orders
+        env:
+          SHOPIFY_STORE: "fgtyz6-bj.myshopify.com"
+          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+          ALIEXPRESS_APP_KEY: ${{ secrets.ALIEXPRESS_APP_KEY }}
+          ALIEXPRESS_SECRET: ${{ secrets.ALIEXPRESS_SECRET }}
+          GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: python b3_order_fulfiller.py
+      - name: Save DB
+        uses: actions/cache/save@v4
+        with:
+          path: dropship.db
+          key: dropship-db-${{ github.run_id }}
