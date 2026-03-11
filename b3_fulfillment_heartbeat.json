@@ -1,0 +1,8 @@
+{
+  "module": "b3_order_fulfiller",
+  "last_run": "2026-03-11T16:59:58.422734",
+  "orders_processed": 0,
+  "auto_fulfilled": 0,
+  "revenue_usd": 0.0,
+  "status": "success"
+}
