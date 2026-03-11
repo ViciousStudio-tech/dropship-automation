@@ -120,7 +120,7 @@ def place_cj_order(token: str, order: dict, cj_product_id: str) -> str | None:
         log.info(f"  Manual fulfillment needed — CJ product ID: {cj_product_id}")
         return "MANUAL_QUEUE"
 
-    addr = order.get("shipping_address", {})
+    addr = order.get("shipping_address") or {}
     try:
         payload = {
             "orderNumber": f"VF-{order.get('order_number', 'UNKNOWN')}",
@@ -219,67 +219,79 @@ def main():
     revenue   = 0.0
     manual_needed = []
 
-    for order in orders:
-        shopify_order_id = str(order["id"])
+    try:
+        for order in orders:
+            shopify_order_id = str(order["id"])
 
-        # Skip already processed
-        if conn.execute("SELECT id FROM orders WHERE shopify_order_id=?",
-                        (shopify_order_id,)).fetchone():
-            continue
+            # Skip already processed
+            if conn.execute("SELECT id FROM orders WHERE shopify_order_id=?",
+                            (shopify_order_id,)).fetchone():
+                continue
 
-        log.info(f"Processing order #{order.get('order_number')} — {order.get('email')}")
+            log.info(f"Processing order #{order.get('order_number')} — {order.get('email')}")
 
-        cj_order_id = None
-        for item in order.get("line_items", []):
-            cj_pid = get_cj_product_id_for_variant(str(item["variant_id"]))
-            if cj_pid:
-                cj_order_id = place_cj_order(token, order, cj_pid)
-                break  # One CJ call per order
+            # Guard against null shipping_address (Shopify can return null)
+            shipping_addr = order.get("shipping_address") or {}
 
-        total_revenue  = float(order.get("total_price", 0))
-        estimated_cost = total_revenue * 0.35
-        profit         = total_revenue - estimated_cost
+            cj_order_id = None
+            for item in order.get("line_items", []):
+                variant_id = item.get("variant_id")
+                if not variant_id:
+                    continue
+                cj_pid = get_cj_product_id_for_variant(str(variant_id))
+                if cj_pid:
+                    cj_order_id = place_cj_order(token, order, cj_pid)
+                    break  # One CJ call per order
 
-        conn.execute("""
-            INSERT OR IGNORE INTO orders
-            (shopify_order_id, shopify_order_num, cj_order_id,
-             customer_email, customer_name, shipping_address,
-             line_items, total_revenue, total_cost, profit, status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            shopify_order_id,
-            str(order.get("order_number", "")),
-            cj_order_id or "",
-            order.get("email", ""),
-            order.get("shipping_address", {}).get("name", ""),
-            json.dumps(order.get("shipping_address", {})),
-            json.dumps(order.get("line_items", [])),
-            total_revenue, estimated_cost, profit,
-            "processing" if cj_order_id and cj_order_id != "MANUAL_QUEUE" else "manual_needed"
-        ))
-        conn.commit()
+            total_revenue  = float(order.get("total_price", 0))
+            estimated_cost = total_revenue * 0.35
+            profit         = total_revenue - estimated_cost
 
-        if cj_order_id == "MANUAL_QUEUE":
-            manual_needed.append({
-                "num": order.get("order_number"),
-                "customer": order.get("shipping_address", {}).get("name", ""),
-                "total": total_revenue
-            })
-            note_shopify_order(shopify_order_id, "MANUAL FULFILLMENT NEEDED — CJ order not placed")
-        elif cj_order_id:
-            fulfilled += 1
-            note_shopify_order(shopify_order_id, f"CJ Order ID: {cj_order_id}")
+            conn.execute("""
+                INSERT OR IGNORE INTO orders
+                (shopify_order_id, shopify_order_num, cj_order_id,
+                 customer_email, customer_name, shipping_address,
+                 line_items, total_revenue, total_cost, profit, status)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                shopify_order_id,
+                str(order.get("order_number", "")),
+                cj_order_id or "",
+                order.get("email", ""),
+                shipping_addr.get("name", ""),
+                json.dumps(shipping_addr),
+                json.dumps(order.get("line_items", [])),
+                total_revenue, estimated_cost, profit,
+                "processing" if cj_order_id and cj_order_id != "MANUAL_QUEUE" else "manual_needed"
+            ))
+            conn.commit()
 
-        revenue += total_revenue
-        time.sleep(0.5)
+            if cj_order_id == "MANUAL_QUEUE":
+                manual_needed.append({
+                    "num": order.get("order_number"),
+                    "customer": shipping_addr.get("name", ""),
+                    "total": total_revenue
+                })
+                note_shopify_order(shopify_order_id, "MANUAL FULFILLMENT NEEDED — CJ order not placed")
+            elif cj_order_id:
+                fulfilled += 1
+                note_shopify_order(shopify_order_id, f"CJ Order ID: {cj_order_id}")
 
-    # Alert for manual orders
-    if manual_needed:
-        send_manual_alert(manual_needed)
+            revenue += total_revenue
+            time.sleep(0.5)
 
-    log.info(f"Done. Processed {len(orders)} orders. Auto-fulfilled: {fulfilled}. Manual: {len(manual_needed)}. Revenue: ${revenue:.2f}")
-    write_heartbeat(len(orders), fulfilled, revenue)
-    conn.close()
+        # Alert for manual orders
+        if manual_needed:
+            send_manual_alert(manual_needed)
+
+        log.info(f"Done. Processed {len(orders)} orders. Auto-fulfilled: {fulfilled}. Manual: {len(manual_needed)}. Revenue: ${revenue:.2f}")
+        write_heartbeat(len(orders), fulfilled, revenue)
+        conn.close()
+
+    except Exception as e:
+        log.error(f"Order fulfiller failed: {e}")
+        write_heartbeat(0, 0, 0.0, status=f"error: {e}")
+        raise
 
 if __name__ == "__main__":
     main()

@@ -28,22 +28,18 @@ SHOPIFY_HEADERS = {
 }
 SHOPIFY_BASE = f"https://{SHOPIFY_STORE}/admin/api/2024-10"
 
-# ── Collection mapping: niche keyword → Shopify collection ID ─────────────────
+# ── Collection mapping: niche → Shopify collection ID ─────────────────────────
 # Collections already created in VibeFinds store
+# Home & Kitchen:   304927309898
+# Trending Now:     304927375434
+# Outdoor & Travel: 304927440970
 COLLECTION_MAP = {
     "home decor":           304927309898,  # Home & Kitchen
     "kitchen organizer":    304927309898,  # Home & Kitchen
     "storage solutions":    304927309898,  # Home & Kitchen
-    "minimalist decor":     304927309898,  # Home & Kitchen
-    "cozy home":            304927309898,  # Home & Kitchen
     "wall art":             304927309898,  # Home & Kitchen
-    "LED strip":            304927375434,  # Trending Now
-    "ambient lighting":     304927375434,  # Trending Now
-    "smart home":           304927375434,  # Trending Now
-    "desk organization":    304927375434,  # Trending Now
-    "outdoor":              304927440970,  # Outdoor & Travel
-    "travel":               304927440970,  # Outdoor & Travel
-    "fitness":              304927342666,  # Fitness & Wellness
+    "LED lighting":         304927375434,  # Trending Now
+    "smart home gadgets":   304927375434,  # Trending Now
 }
 
 def niche_to_collection_id(niche: str) -> int | None:
@@ -161,7 +157,7 @@ def add_to_collection(shopify_product_id: str, collection_id: int):
         resp = requests.post(
             f"{SHOPIFY_BASE}/collects.json",
             headers=SHOPIFY_HEADERS,
-            json={"collect": {"product_id": shopify_product_id, "collection_id": collection_id}},
+            json={"collect": {"product_id": int(shopify_product_id), "collection_id": collection_id}},
             timeout=10
         )
         if resp.status_code == 201:
@@ -214,26 +210,32 @@ def main():
     log.info("B3 Store Manager — Listing products to VibeFinds")
     log.info("=" * 60)
 
-    conn = init_db()
-    products = get_pending_products(conn, LISTINGS_PER_RUN)
-    log.info(f"Listing {len(products)} products to {SHOPIFY_STORE}")
+    try:
+        conn = init_db()
+        products = get_pending_products(conn, LISTINGS_PER_RUN)
+        log.info(f"Listing {len(products)} products to {SHOPIFY_STORE}")
 
-    if not products:
-        log.info("No pending products. Run b3_product_finder.py first.")
-        write_heartbeat(0, "no_products")
-        return
+        if not products:
+            log.info("No pending products. Run b3_product_finder.py first.")
+            write_heartbeat(0, "no_products")
+            return
 
-    listed = 0
-    for product in products:
-        shopify_id = create_shopify_product(product)
-        if shopify_id:
-            mark_listed(conn, product["id"], shopify_id)
-            listed += 1
-        time.sleep(0.6)  # Shopify rate limit: 2 req/s
+        listed = 0
+        for product in products:
+            shopify_id = create_shopify_product(product)
+            if shopify_id:
+                mark_listed(conn, product["id"], shopify_id)
+                listed += 1
+            time.sleep(0.6)  # Shopify rate limit: 2 req/s
 
-    log.info(f"Done. Listed {listed}/{len(products)} products.")
-    write_heartbeat(listed)
-    conn.close()
+        log.info(f"Done. Listed {listed}/{len(products)} products.")
+        write_heartbeat(listed)
+        conn.close()
+
+    except Exception as e:
+        log.error(f"Store manager failed: {e}")
+        write_heartbeat(0, status=f"error: {e}")
+        raise
 
 if __name__ == "__main__":
     main()

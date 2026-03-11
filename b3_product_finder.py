@@ -1,10 +1,10 @@
 """
 Business 3 — Dropship Product Finder (CJDropshipping)
-Finds trending home & lifestyle products, scores them with AI, saves to DB.
-Runs via GitHub Actions 2x/week. Fully autonomous — no API approval required.
+Finds trending home & lifestyle products via CJ API, scores them with Claude AI,
+saves real products to SQLite DB. Runs via GitHub Actions 2x/week.
 """
 
-import os, json, time, sqlite3, logging, requests
+import os, json, time, sqlite3, logging, requests, random
 from datetime import datetime
 from pathlib import Path
 import anthropic
@@ -14,8 +14,8 @@ log = logging.getLogger(__name__)
 
 # ── Env ────────────────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-CJ_EMAIL          = os.environ.get("CJ_EMAIL", "")
-CJ_PASSWORD       = os.environ.get("CJ_PASSWORD", "")
+CJ_EMAIL          = os.environ["CJ_EMAIL"]
+CJ_PASSWORD       = os.environ["CJ_PASSWORD"]
 PRODUCTS_PER_RUN  = int(os.environ.get("PRODUCTS_PER_RUN", "20"))
 DB_PATH           = os.environ.get("DB_PATH", "data/dropship.db")
 
@@ -26,18 +26,17 @@ CJ_BASE = "https://developers.cjdropshipping.com/api2.0/v1"
 
 # ── Niches — Aesthetic Home & Lifestyle ───────────────────────────────────────
 NICHES = [
-    "home decor", "LED strip lights", "kitchen organizer",
-    "smart home gadgets", "wall art canvas", "storage solutions",
-    "ambient lighting", "desk organization", "minimalist decor",
-    "cozy home accessories"
+    "home decor",
+    "LED lighting",
+    "kitchen organizer",
+    "smart home gadgets",
+    "wall art",
+    "storage solutions",
 ]
 
 # ── CJDropshipping Auth ────────────────────────────────────────────────────────
 def cj_get_token() -> str | None:
-    """Get CJDropshipping access token. Returns token string or None."""
-    if not CJ_EMAIL or not CJ_PASSWORD:
-        log.warning("CJ_EMAIL / CJ_PASSWORD not set — using mock data")
-        return None
+    """Authenticate with CJDropshipping API. Returns access token or None."""
     try:
         resp = requests.post(
             f"{CJ_BASE}/authentication/getAccessToken",
@@ -57,9 +56,10 @@ def cj_get_token() -> str | None:
         return None
 
 # ── CJDropshipping Product Search ─────────────────────────────────────────────
-def cj_search_products(token: str, keyword: str, page: int = 1) -> list:
+def cj_search_products(token: str | None, keyword: str, page: int = 1) -> list:
     """Search CJ for products. Returns list of product dicts."""
     if not token:
+        log.warning(f"  No CJ token — using mock data for '{keyword}'")
         return _mock_products(keyword)
     try:
         resp = requests.get(
@@ -69,8 +69,6 @@ def cj_search_products(token: str, keyword: str, page: int = 1) -> list:
                 "keyword": keyword,
                 "pageNum": page,
                 "pageSize": 20,
-                "sortField": "orderCount",
-                "sortOrder": "desc"
             },
             timeout=15
         )
@@ -86,9 +84,27 @@ def cj_search_products(token: str, keyword: str, page: int = 1) -> list:
         log.error(f"CJ search error: {e}")
         return []
 
-# ── Mock data (when CJ creds not set) ─────────────────────────────────────────
+# ── CJDropshipping Product Detail ─────────────────────────────────────────────
+def cj_get_product_detail(token: str, product_id: str) -> dict | None:
+    """Fetch full product detail from CJ API."""
+    if not token:
+        return None
+    try:
+        resp = requests.get(
+            f"{CJ_BASE}/product/query",
+            headers={"CJ-Access-Token": token},
+            params={"pid": product_id},
+            timeout=15
+        )
+        data = resp.json()
+        if data.get("result") is True:
+            return data.get("data")
+    except Exception as e:
+        log.error(f"CJ product detail error: {e}")
+    return None
+
+# ── Mock data (fallback when CJ auth fails) ──────────────────────────────────
 def _mock_products(keyword: str) -> list:
-    import random
     return [{
         "pid": f"mock_{keyword[:8].replace(' ','_')}_{i}",
         "productNameEn": f"Premium {keyword.title()} - Style {chr(65+i)} [{datetime.now().year}]",
@@ -140,7 +156,7 @@ Category: {product.get('categoryName', niche)}
 Score it and write store content. Return ONLY valid JSON:
 {{
   "score": <1-10 dropshipping viability score>,
-  "sell_price": <recommended USD retail price as float, 2.5-3x cost, min $15>,
+  "sell_price": <recommended USD retail price as float, 2.5x markup on cost, minimum $15>,
   "description": <compelling 120-word Shopify product description, benefits-first>,
   "tags": <comma-separated 6 SEO tags relevant to home/lifestyle>,
   "skip": <true if unsuitable for a home decor / lifestyle store, false otherwise>
@@ -165,7 +181,7 @@ Score it and write store content. Return ONLY valid JSON:
 def save_product(conn, product: dict, ai: dict, niche: str) -> bool:
     cost = float(product.get("sellPrice") or
                  (product.get("variants") or [{}])[0].get("variantSellPrice", 10))
-    sell = float(ai.get("sell_price", cost * 2.8))
+    sell = float(ai.get("sell_price", cost * 2.5))
     margin = round((sell - cost) / max(sell, 0.01) * 100, 1)
 
     image = (product.get("productImage") or
@@ -210,47 +226,54 @@ def write_heartbeat(products_found: int, status: str = "success"):
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main():
-    import random
     log.info("=" * 60)
     log.info("B3 Product Finder — CJDropshipping")
     log.info("=" * 60)
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    conn   = init_db()
-    token  = cj_get_token()
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        conn   = init_db()
+        token  = cj_get_token()
 
-    total_saved = 0
-    selected_niches = random.sample(NICHES, 4)
-    log.info(f"Scanning: {selected_niches}")
+        total_saved = 0
+        # Search all 6 niches each run
+        niches_to_search = NICHES[:]
+        random.shuffle(niches_to_search)
+        log.info(f"Scanning niches: {niches_to_search}")
 
-    for niche in selected_niches:
-        if total_saved >= PRODUCTS_PER_RUN:
-            break
-        log.info(f"Searching niche: {niche}")
-        products = cj_search_products(token, niche)
-
-        for product in products:
+        for niche in niches_to_search:
             if total_saved >= PRODUCTS_PER_RUN:
                 break
-            if product.get("isStock") == "NO":
-                continue
+            log.info(f"Searching niche: {niche}")
+            products = cj_search_products(token, niche)
 
-            ai = ai_score_and_describe(client, product, niche)
-            if ai.get("skip") or int(ai.get("score", 0)) < 6:
-                continue
+            for product in products:
+                if total_saved >= PRODUCTS_PER_RUN:
+                    break
+                if product.get("isStock") == "NO":
+                    continue
 
-            if save_product(conn, product, ai, niche):
-                total_saved += 1
-                sell = ai.get("sell_price", 0)
-                log.info(f"  + {product.get('productNameEn','')[:55]} | score={ai.get('score')} | ${sell:.2f}")
-            time.sleep(0.5)
+                ai = ai_score_and_describe(client, product, niche)
+                if ai.get("skip") or int(ai.get("score", 0)) < 6:
+                    continue
 
-        time.sleep(2)
+                if save_product(conn, product, ai, niche):
+                    total_saved += 1
+                    sell = ai.get("sell_price", 0)
+                    log.info(f"  + {product.get('productNameEn','')[:55]} | score={ai.get('score')} | ${sell:.2f}")
+                time.sleep(0.5)
 
-    pending = conn.execute("SELECT COUNT(*) FROM products WHERE status='pending'").fetchone()[0]
-    log.info(f"Done. Saved {total_saved} new products. Total pending: {pending}")
-    write_heartbeat(total_saved)
-    conn.close()
+            time.sleep(2)
+
+        pending = conn.execute("SELECT COUNT(*) FROM products WHERE status='pending'").fetchone()[0]
+        log.info(f"Done. Saved {total_saved} new products. Total pending: {pending}")
+        write_heartbeat(total_saved)
+        conn.close()
+
+    except Exception as e:
+        log.error(f"Product finder failed: {e}")
+        write_heartbeat(0, status=f"error: {e}")
+        raise
 
 if __name__ == "__main__":
     main()

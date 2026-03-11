@@ -10,7 +10,8 @@ import time
 import sqlite3
 import logging
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
+from pathlib import Path
 import anthropic
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -29,13 +30,16 @@ SHOPIFY_HEADERS = {
 }
 SHOPIFY_BASE = f"https://{SHOPIFY_STORE}/admin/api/2024-10"
 
+HEARTBEAT = Path("b3_optimizer_heartbeat.json")
+
 def get_store_stats() -> dict:
     """Fetch this week's orders and revenue from Shopify."""
     try:
+        since = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
         resp = requests.get(
             f"{SHOPIFY_BASE}/orders/count.json",
             headers=SHOPIFY_HEADERS,
-            params={"financial_status": "paid", "created_at_min": "7 days ago"},
+            params={"financial_status": "paid", "created_at_min": since},
             timeout=10
         )
         order_count = resp.json().get("count", 0)
@@ -141,35 +145,53 @@ def send_email_report(report: str, stats: dict):
     except Exception as e:
         log.error(f"Email failed: {e}")
 
+def write_heartbeat(refreshed: int, status: str = "success"):
+    HEARTBEAT.write_text(json.dumps({
+        "module": "b3_ai_optimizer",
+        "last_run": datetime.now().isoformat(),
+        "refreshed": refreshed,
+        "status": status
+    }, indent=2))
+
 def main():
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    conn = sqlite3.connect(DB_PATH)
+    log.info("=" * 60)
+    log.info("B3 AI Optimizer — VibeFinds")
+    log.info("=" * 60)
 
-    # 1. Get store stats
-    stats = get_store_stats()
-    log.info(f"Store stats: {stats}")
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        conn = sqlite3.connect(DB_PATH)
 
-    # 2. Refresh low-performing product descriptions
-    low_performers = get_low_performing_products(conn)
-    log.info(f"Refreshing {len(low_performers)} low-performing listings")
-    refreshed = 0
-    for product in low_performers:
-        new_desc = refresh_product_description(client, product)
-        if product.get("shopify_id") and update_shopify_description(product["shopify_id"], new_desc):
-            conn.execute("UPDATE products SET ai_description=? WHERE id=?",
-                        (new_desc, product["id"]))
-            conn.commit()
-            refreshed += 1
-            log.info(f"  Refreshed: {product['title'][:50]}")
-        time.sleep(1)
+        # 1. Get store stats
+        stats = get_store_stats()
+        log.info(f"Store stats: {stats}")
 
-    # 3. Generate and send weekly report
-    report = generate_weekly_report(client, conn, stats)
-    log.info(f"\n{'='*50}\nWEEKLY REPORT:\n{report}\n{'='*50}")
-    send_email_report(report, stats)
+        # 2. Refresh low-performing product descriptions
+        low_performers = get_low_performing_products(conn)
+        log.info(f"Refreshing {len(low_performers)} low-performing listings")
+        refreshed = 0
+        for product in low_performers:
+            new_desc = refresh_product_description(client, product)
+            if product.get("shopify_id") and update_shopify_description(product["shopify_id"], new_desc):
+                conn.execute("UPDATE products SET ai_description=? WHERE id=?",
+                            (new_desc, product["id"]))
+                conn.commit()
+                refreshed += 1
+                log.info(f"  Refreshed: {product['title'][:50]}")
+            time.sleep(1)
 
-    with open("b3_optimizer_heartbeat.json", "w") as f:
-        json.dump({"last_run": datetime.now().isoformat(), "refreshed": refreshed, "status": "ok"}, f)
+        # 3. Generate and send weekly report
+        report = generate_weekly_report(client, conn, stats)
+        log.info(f"\n{'='*50}\nWEEKLY REPORT:\n{report}\n{'='*50}")
+        send_email_report(report, stats)
+
+        write_heartbeat(refreshed)
+        conn.close()
+
+    except Exception as e:
+        log.error(f"AI optimizer failed: {e}")
+        write_heartbeat(0, status=f"error: {e}")
+        raise
 
 if __name__ == "__main__":
     main()
