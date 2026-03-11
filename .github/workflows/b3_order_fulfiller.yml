@@ -23,8 +23,7 @@ jobs:
         env:
           SHOPIFY_STORE: "fgtyz6-bj.myshopify.com"
           SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
-          CJ_EMAIL: ${{ secrets.CJ_EMAIL }}
-          CJ_PASSWORD: ${{ secrets.CJ_PASSWORD }}
+          CJ_API_KEY: ${{ secrets.CJ_API_KEY }}
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           GMAIL_TO: ${{ secrets.GMAIL_TO }}
