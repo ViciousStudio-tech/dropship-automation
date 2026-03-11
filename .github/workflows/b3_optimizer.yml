@@ -2,7 +2,7 @@ name: B3 AI Optimizer
 
 on:
   schedule:
-    - cron: '0 9 * * 0'  # Every Sunday 9am UTC
+    - cron: '0 9 * * 0'  # Sunday 9am UTC
   workflow_dispatch:
 
 jobs:
@@ -10,27 +10,31 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - run: pip install anthropic requests
-      - name: Restore DB
-        uses: actions/cache@v4
-        with:
-          path: dropship.db
-          key: dropship-db-latest
-          restore-keys: dropship-db-
-      - name: Run Optimizer
+
+      - name: Optimize listings and report
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SHOPIFY_STORE: "fgtyz6-bj.myshopify.com"
           SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
-          GMAIL_TO: ${{ secrets.GMAIL_TO }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GMAIL_TO: ${{ secrets.GMAIL_TO }}
+          DB_PATH: "data/dropship.db"
         run: python b3_ai_optimizer.py
-      - name: Save DB
-        uses: actions/cache/save@v4
-        with:
-          path: dropship.db
-          key: dropship-db-${{ github.run_id }}
+
+      - name: Commit DB and heartbeat
+        run: |
+          git config user.name "VibeFinds Bot"
+          git config user.email "bot@vibefinds.store"
+          mkdir -p data
+          git add -f data/dropship.db b3_optimizer_heartbeat.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "B3 optimizer run $(date +%Y-%m-%d) [skip ci]"
+          git push origin main || true

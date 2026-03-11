@@ -21,7 +21,7 @@ SHOPIFY_STORE        = os.environ.get("SHOPIFY_STORE", "fgtyz6-bj.myshopify.com"
 SHOPIFY_ACCESS_TOKEN = os.environ["SHOPIFY_ACCESS_TOKEN"]
 GMAIL_SENDER         = os.environ.get("GMAIL_SENDER", "")
 GMAIL_TO             = os.environ.get("GMAIL_TO", GMAIL_SENDER)
-DB_PATH              = "dropship.db"
+DB_PATH              = os.environ.get("DB_PATH", "data/dropship.db")
 
 SHOPIFY_HEADERS = {
     "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
@@ -71,7 +71,7 @@ Niche: {product['niche']}"""
 
     try:
         msg = client.messages.create(
-            model="claude-opus-4-5",
+            model="claude-sonnet-4-20250514",
             max_tokens=400,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -113,7 +113,7 @@ Stats:
 Be encouraging but honest. Suggest 1 action item."""
 
         msg = client.messages.create(
-            model="claude-opus-4-5",
+            model="claude-sonnet-4-20250514",
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}]
         )

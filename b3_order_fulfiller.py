@@ -1,16 +1,13 @@
 """
-Business 3 — Order Fulfiller
-Checks Shopify for new orders, auto-places them on AliExpress, updates tracking.
+Business 3 — Order Fulfiller (CJDropshipping)
+Checks Shopify for paid unfulfilled orders, routes them to CJ for fulfillment.
 Runs every 4 hours via GitHub Actions.
 """
 
-import os
-import json
-import time
-import sqlite3
-import logging
-import requests
+import os, json, time, sqlite3, logging, requests, smtplib
 from datetime import datetime, timedelta
+from pathlib import Path
+from email.mime.text import MIMEText
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -18,41 +15,64 @@ log = logging.getLogger(__name__)
 # ── Env ────────────────────────────────────────────────────────────────────────
 SHOPIFY_STORE        = os.environ.get("SHOPIFY_STORE", "fgtyz6-bj.myshopify.com")
 SHOPIFY_ACCESS_TOKEN = os.environ["SHOPIFY_ACCESS_TOKEN"]
-ALIEXPRESS_APP_KEY   = os.environ.get("ALIEXPRESS_APP_KEY", "")
-ALIEXPRESS_SECRET    = os.environ.get("ALIEXPRESS_SECRET", "")
+CJ_EMAIL             = os.environ.get("CJ_EMAIL", "")
+CJ_PASSWORD          = os.environ.get("CJ_PASSWORD", "")
 GMAIL_SENDER         = os.environ.get("GMAIL_SENDER", "")
-DB_PATH              = "dropship.db"
+GMAIL_APP_PASSWORD   = os.environ.get("GMAIL_APP_PASSWORD", "")
+GMAIL_TO             = os.environ.get("GMAIL_TO", GMAIL_SENDER)
+DB_PATH              = os.environ.get("DB_PATH", "data/dropship.db")
+
+Path("data").mkdir(exist_ok=True)
+HEARTBEAT = Path("b3_fulfillment_heartbeat.json")
 
 SHOPIFY_HEADERS = {
     "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
     "Content-Type": "application/json"
 }
 SHOPIFY_BASE = f"https://{SHOPIFY_STORE}/admin/api/2024-10"
+CJ_BASE      = "https://developers.cjdropshipping.com/api2.0/v1"
+
+# ── CJ Auth ────────────────────────────────────────────────────────────────────
+def cj_get_token() -> str | None:
+    if not CJ_EMAIL or not CJ_PASSWORD:
+        return None
+    try:
+        resp = requests.post(
+            f"{CJ_BASE}/authentication/getAccessToken",
+            json={"email": CJ_EMAIL, "password": CJ_PASSWORD},
+            timeout=15
+        )
+        data = resp.json()
+        if data.get("result") is True:
+            return data["data"]["accessToken"]
+    except Exception as e:
+        log.error(f"CJ auth error: {e}")
+    return None
 
 # ── DB ─────────────────────────────────────────────────────────────────────────
 def init_orders_db(conn):
     conn.execute("""
         CREATE TABLE IF NOT EXISTS orders (
-            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-            shopify_order_id   TEXT UNIQUE,
-            shopify_order_num  TEXT,
-            aliexpress_order_id TEXT,
-            customer_email     TEXT,
-            customer_name      TEXT,
-            shipping_address   TEXT,
-            line_items         TEXT,
-            total_revenue      REAL,
-            total_cost         REAL,
-            profit             REAL,
-            status             TEXT DEFAULT 'new',
-            tracking_number    TEXT,
-            fulfilled_at       TEXT,
-            created_at         TEXT DEFAULT (datetime('now'))
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            shopify_order_id    TEXT UNIQUE,
+            shopify_order_num   TEXT,
+            cj_order_id         TEXT,
+            customer_email      TEXT,
+            customer_name       TEXT,
+            shipping_address    TEXT,
+            line_items          TEXT,
+            total_revenue       REAL,
+            total_cost          REAL,
+            profit              REAL,
+            status              TEXT DEFAULT 'new',
+            tracking_number     TEXT,
+            fulfilled_at        TEXT,
+            created_at          TEXT DEFAULT (datetime('now'))
         )
     """)
     conn.commit()
 
-# ── Shopify: fetch unfulfilled orders ──────────────────────────────────────────
+# ── Shopify: fetch unfulfilled paid orders ─────────────────────────────────────
 def get_unfulfilled_orders() -> list:
     since = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
@@ -73,186 +93,193 @@ def get_unfulfilled_orders() -> list:
         log.error(f"Failed to fetch orders: {e}")
         return []
 
-# ── Get AliExpress product URL from Shopify metafield ─────────────────────────
-def get_aliexpress_url_for_variant(variant_id: str) -> str | None:
-    """Look up the AliExpress URL stored in product metafields."""
+# ── Get CJ product ID from Shopify product metafields ─────────────────────────
+def get_cj_product_id_for_variant(variant_id: str) -> str | None:
     try:
-        # Get product from variant
         resp = requests.get(
             f"{SHOPIFY_BASE}/variants/{variant_id}.json",
             headers=SHOPIFY_HEADERS, timeout=10
         )
         product_id = resp.json()["variant"]["product_id"]
 
-        # Get metafields
         resp2 = requests.get(
             f"{SHOPIFY_BASE}/products/{product_id}/metafields.json",
             headers=SHOPIFY_HEADERS, timeout=10
         )
         for mf in resp2.json().get("metafields", []):
-            if mf.get("key") == "aliexpress_url":
+            if mf.get("namespace") == "dropship" and mf.get("key") == "cj_product_id":
                 return mf.get("value")
     except Exception as e:
         log.error(f"Metafield lookup failed: {e}")
     return None
 
-# ── Place order on AliExpress (API or manual queue) ───────────────────────────
-def place_aliexpress_order(order: dict, aliexpress_url: str) -> str | None:
-    """
-    Attempt to place order via AliExpress API.
-    Falls back to queuing for manual placement if API unavailable.
-    """
-    if not ALIEXPRESS_APP_KEY:
-        # Queue for manual fulfillment — log details clearly
-        log.info(f"⚠️  MANUAL FULFILLMENT NEEDED:")
-        log.info(f"   Customer: {order.get('shipping_address',{}).get('name')}")
-        log.info(f"   Address: {order.get('shipping_address',{})}")
-        log.info(f"   AliExpress URL: {aliexpress_url}")
+# ── CJ: Place order ────────────────────────────────────────────────────────────
+def place_cj_order(token: str, order: dict, cj_product_id: str) -> str | None:
+    """Place order on CJDropshipping. Returns CJ order ID or None."""
+    if not token or not cj_product_id:
+        log.info(f"  Manual fulfillment needed — CJ product ID: {cj_product_id}")
         return "MANUAL_QUEUE"
 
-    # AliExpress DS Order API
-    shipping_addr = order.get("shipping_address", {})
-    params = {
-        "method": "aliexpress.ds.order.create",
-        "app_key": ALIEXPRESS_APP_KEY,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "format": "json",
-        "v": "2.0",
-        "logistics_address": json.dumps({
-            "contact_person": shipping_addr.get("name", ""),
-            "address": shipping_addr.get("address1", ""),
-            "address2": shipping_addr.get("address2", ""),
-            "city": shipping_addr.get("city", ""),
-            "province": shipping_addr.get("province", ""),
-            "zip": shipping_addr.get("zip", ""),
-            "country": shipping_addr.get("country_code", "US"),
-            "phone_country": "+1",
-            "mobile_no": shipping_addr.get("phone", "5555555555")
-        }),
-        "product_items": json.dumps([{
-            "product_id": aliexpress_url.split("/item/")[-1].split(".")[0] if "/item/" in aliexpress_url else "",
-            "sku_attr": "",
-            "quantity": 1
-        }])
-    }
-
+    addr = order.get("shipping_address", {})
     try:
-        resp = requests.post("https://gw.api.taobao.com/router/rest", params=params, timeout=20)
-        result = resp.json()
-        ae_order_id = result.get("aliexpress_ds_order_create_response", {}) \
-                            .get("result", {}).get("ae_order_id")
-        return ae_order_id
-    except Exception as e:
-        log.error(f"AliExpress order placement failed: {e}")
-        return None
-
-# ── Mark fulfilled on Shopify ──────────────────────────────────────────────────
-def fulfill_shopify_order(shopify_order_id: str, tracking_num: str = ""):
-    """Create fulfillment on Shopify."""
-    try:
-        # Get fulfillment order ID
-        resp = requests.get(
-            f"{SHOPIFY_BASE}/orders/{shopify_order_id}/fulfillment_orders.json",
-            headers=SHOPIFY_HEADERS, timeout=10
-        )
-        fo_id = resp.json()["fulfillment_orders"][0]["id"]
-
-        # Create fulfillment
-        body = {
-            "fulfillment": {
-                "line_items_by_fulfillment_order": [{"fulfillment_order_id": fo_id}],
-                "notify_customer": True
-            }
+        payload = {
+            "orderNumber": f"VF-{order.get('order_number', 'UNKNOWN')}",
+            "shippingZip": addr.get("zip", ""),
+            "shippingCountry": addr.get("country_code", "US"),
+            "shippingCountryCode": addr.get("country_code", "US"),
+            "shippingProvince": addr.get("province", ""),
+            "shippingCity": addr.get("city", ""),
+            "shippingAddress": addr.get("address1", ""),
+            "shippingAddress2": addr.get("address2", ""),
+            "shippingCustomerName": addr.get("name", ""),
+            "shippingPhone": addr.get("phone", "0000000000"),
+            "remark": f"VibeFinds order #{order.get('order_number')}",
+            "products": [{
+                "vid": cj_product_id,
+                "quantity": 1
+            }]
         }
-        if tracking_num and tracking_num != "MANUAL_QUEUE":
-            body["fulfillment"]["tracking_info"] = {
-                "number": tracking_num,
-                "company": "AliExpress Standard Shipping"
-            }
-
-        resp2 = requests.post(
-            f"{SHOPIFY_BASE}/fulfillments.json",
-            headers=SHOPIFY_HEADERS, json=body, timeout=15
+        resp = requests.post(
+            f"{CJ_BASE}/shopping/order/createOrderV2",
+            headers={"CJ-Access-Token": token, "Content-Type": "application/json"},
+            json=payload,
+            timeout=20
         )
-        return resp2.status_code == 201
+        data = resp.json()
+        if data.get("result") is True:
+            cj_order_id = data.get("data", {}).get("orderId") or data.get("data", {}).get("orderNum")
+            log.info(f"  CJ order placed: {cj_order_id}")
+            return cj_order_id
+        else:
+            log.warning(f"  CJ order failed: {data.get('message')} — queuing manual")
+            return "MANUAL_QUEUE"
     except Exception as e:
-        log.error(f"Shopify fulfillment error: {e}")
-        return False
+        log.error(f"CJ order error: {e}")
+        return "MANUAL_QUEUE"
+
+# ── Shopify: mark as processing ────────────────────────────────────────────────
+def note_shopify_order(shopify_order_id: str, note: str):
+    """Add internal note to Shopify order."""
+    try:
+        requests.put(
+            f"{SHOPIFY_BASE}/orders/{shopify_order_id}.json",
+            headers=SHOPIFY_HEADERS,
+            json={"order": {"id": shopify_order_id, "note": note}},
+            timeout=10
+        )
+    except Exception:
+        pass
+
+# ── Email alert for manual orders ─────────────────────────────────────────────
+def send_manual_alert(orders_needing_manual: list):
+    if not orders_needing_manual or not GMAIL_SENDER or not GMAIL_APP_PASSWORD:
+        return
+    try:
+        body = f"Manual fulfillment needed for {len(orders_needing_manual)} order(s):\n\n"
+        for o in orders_needing_manual:
+            body += f"  Order #{o['num']} — {o['customer']} — ${o['total']}\n"
+        body += "\nLog in to Shopify + CJDropshipping to fulfill manually."
+
+        msg = MIMEText(body)
+        msg["Subject"] = f"ACTION NEEDED: {len(orders_needing_manual)} manual order(s) — VibeFinds"
+        msg["From"] = GMAIL_SENDER
+        msg["To"] = GMAIL_TO
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(GMAIL_SENDER, GMAIL_APP_PASSWORD)
+            smtp.send_message(msg)
+        log.info("Manual fulfillment alert sent")
+    except Exception as e:
+        log.error(f"Email alert failed: {e}")
+
+# ── Heartbeat ──────────────────────────────────────────────────────────────────
+def write_heartbeat(orders_processed: int, auto_fulfilled: int, revenue: float, status: str = "success"):
+    HEARTBEAT.write_text(json.dumps({
+        "module": "b3_order_fulfiller",
+        "last_run": datetime.now().isoformat(),
+        "orders_processed": orders_processed,
+        "auto_fulfilled": auto_fulfilled,
+        "revenue_usd": round(revenue, 2),
+        "status": status
+    }, indent=2))
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main():
+    log.info("=" * 60)
+    log.info("B3 Order Fulfiller — CJDropshipping")
+    log.info("=" * 60)
+
     conn = sqlite3.connect(DB_PATH)
     init_orders_db(conn)
 
+    token  = cj_get_token()
     orders = get_unfulfilled_orders()
     log.info(f"Found {len(orders)} unfulfilled paid orders")
 
     fulfilled = 0
-    revenue = 0.0
+    revenue   = 0.0
+    manual_needed = []
 
     for order in orders:
         shopify_order_id = str(order["id"])
 
-        # Skip if already processed
-        existing = conn.execute(
-            "SELECT id FROM orders WHERE shopify_order_id=?", (shopify_order_id,)
-        ).fetchone()
-        if existing:
+        # Skip already processed
+        if conn.execute("SELECT id FROM orders WHERE shopify_order_id=?",
+                        (shopify_order_id,)).fetchone():
             continue
 
         log.info(f"Processing order #{order.get('order_number')} — {order.get('email')}")
 
-        # Process each line item
+        cj_order_id = None
         for item in order.get("line_items", []):
-            ae_url = get_aliexpress_url_for_variant(str(item["variant_id"]))
-            ae_order_id = None
-            if ae_url:
-                ae_order_id = place_aliexpress_order(order, ae_url)
+            cj_pid = get_cj_product_id_for_variant(str(item["variant_id"]))
+            if cj_pid:
+                cj_order_id = place_cj_order(token, order, cj_pid)
+                break  # One CJ call per order
 
-        # Calculate profit
-        total_revenue = float(order.get("total_price", 0))
-        # Estimated cost (30% of revenue as rough average)
-        estimated_cost = total_revenue * 0.30
-        profit = total_revenue - estimated_cost
+        total_revenue  = float(order.get("total_price", 0))
+        estimated_cost = total_revenue * 0.35
+        profit         = total_revenue - estimated_cost
 
-        # Save to DB
         conn.execute("""
             INSERT OR IGNORE INTO orders
-            (shopify_order_id, shopify_order_num, aliexpress_order_id,
+            (shopify_order_id, shopify_order_num, cj_order_id,
              customer_email, customer_name, shipping_address,
              line_items, total_revenue, total_cost, profit, status)
             VALUES (?,?,?,?,?,?,?,?,?,?,?)
         """, (
             shopify_order_id,
             str(order.get("order_number", "")),
-            ae_order_id or "",
+            cj_order_id or "",
             order.get("email", ""),
             order.get("shipping_address", {}).get("name", ""),
             json.dumps(order.get("shipping_address", {})),
             json.dumps(order.get("line_items", [])),
             total_revenue, estimated_cost, profit,
-            "processing" if ae_order_id else "manual_needed"
+            "processing" if cj_order_id and cj_order_id != "MANUAL_QUEUE" else "manual_needed"
         ))
         conn.commit()
 
-        # Mark as processing on Shopify (customer sees order is being prepared)
-        if ae_order_id and ae_order_id != "MANUAL_QUEUE":
-            fulfill_shopify_order(shopify_order_id, ae_order_id)
+        if cj_order_id == "MANUAL_QUEUE":
+            manual_needed.append({
+                "num": order.get("order_number"),
+                "customer": order.get("shipping_address", {}).get("name", ""),
+                "total": total_revenue
+            })
+            note_shopify_order(shopify_order_id, "MANUAL FULFILLMENT NEEDED — CJ order not placed")
+        elif cj_order_id:
             fulfilled += 1
+            note_shopify_order(shopify_order_id, f"CJ Order ID: {cj_order_id}")
 
         revenue += total_revenue
         time.sleep(0.5)
 
-    log.info(f"Done. Processed {len(orders)} orders. Fulfilled: {fulfilled}. Revenue: ${revenue:.2f}")
+    # Alert for manual orders
+    if manual_needed:
+        send_manual_alert(manual_needed)
 
-    with open("b3_fulfillment_heartbeat.json", "w") as f:
-        json.dump({
-            "last_run": datetime.now().isoformat(),
-            "orders_processed": len(orders),
-            "auto_fulfilled": fulfilled,
-            "revenue_usd": round(revenue, 2),
-            "status": "ok"
-        }, f)
+    log.info(f"Done. Processed {len(orders)} orders. Auto-fulfilled: {fulfilled}. Manual: {len(manual_needed)}. Revenue: ${revenue:.2f}")
+    write_heartbeat(len(orders), fulfilled, revenue)
+    conn.close()
 
 if __name__ == "__main__":
     main()

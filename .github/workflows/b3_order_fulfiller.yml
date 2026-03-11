@@ -10,27 +10,32 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GH_PAT }}
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - run: pip install requests
-      - name: Restore DB
-        uses: actions/cache@v4
-        with:
-          path: dropship.db
-          key: dropship-db-latest
-          restore-keys: dropship-db-
+
       - name: Fulfill Orders
         env:
           SHOPIFY_STORE: "fgtyz6-bj.myshopify.com"
           SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
-          ALIEXPRESS_APP_KEY: ${{ secrets.ALIEXPRESS_APP_KEY }}
-          ALIEXPRESS_SECRET: ${{ secrets.ALIEXPRESS_SECRET }}
+          CJ_EMAIL: ${{ secrets.CJ_EMAIL }}
+          CJ_PASSWORD: ${{ secrets.CJ_PASSWORD }}
           GMAIL_SENDER: ${{ secrets.GMAIL_SENDER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GMAIL_TO: ${{ secrets.GMAIL_TO }}
+          DB_PATH: "data/dropship.db"
         run: python b3_order_fulfiller.py
-      - name: Save DB
-        uses: actions/cache/save@v4
-        with:
-          path: dropship.db
-          key: dropship-db-${{ github.run_id }}
+
+      - name: Commit DB and heartbeat
+        run: |
+          git config user.name "VibeFinds Bot"
+          git config user.email "bot@vibefinds.store"
+          mkdir -p data
+          git add -f data/dropship.db b3_fulfillment_heartbeat.json 2>/dev/null || true
+          git diff --staged --quiet || git commit -m "B3 fulfiller run $(date +%Y-%m-%d-%H%M) [skip ci]"
+          git push origin main || true
