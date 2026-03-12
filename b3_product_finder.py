@@ -204,8 +204,8 @@ def init_db() -> sqlite3.Connection:
 # ── Claude AI scoring ──────────────────────────────────────────────────────────
 def ai_score_and_describe(client, product: dict, niche: str) -> dict:
     title = product.get("productNameEn", "Unknown product")
-    cost  = float(product.get("sellPrice") or
-                  (product.get("variants") or [{}])[0].get("variantSellPrice", 10))
+    raw_price = product.get("sellPrice") or (product.get("variants") or [{}])[0].get("variantSellPrice", 10)
+    cost  = float(str(raw_price).split("--")[0].strip() if "--" in str(raw_price) else raw_price)
 
     prompt = f"""Evaluate this dropshipping product for a home & lifestyle store called VibeFinds.
 
@@ -240,8 +240,8 @@ Score it and write store content. Return ONLY valid JSON:
 
 # ── Save to DB ─────────────────────────────────────────────────────────────────
 def save_product(conn, product: dict, ai: dict, niche: str) -> bool:
-    cost = float(product.get("sellPrice") or
-                 (product.get("variants") or [{}])[0].get("variantSellPrice", 10))
+    raw_price = product.get("sellPrice") or (product.get("variants") or [{}])[0].get("variantSellPrice", 10)
+    cost = float(str(raw_price).split("--")[0].strip() if "--" in str(raw_price) else raw_price)
     sell = float(ai.get("sell_price", cost * 2.5))
     margin = round((sell - cost) / max(sell, 0.01) * 100, 1)
 
