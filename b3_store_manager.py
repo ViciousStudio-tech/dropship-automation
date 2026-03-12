@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 ANTHROPIC_API_KEY    = os.environ["ANTHROPIC_API_KEY"]
 SHOPIFY_STORE        = os.environ.get("SHOPIFY_STORE", "fgtyz6-bj.myshopify.com")
 SHOPIFY_ACCESS_TOKEN = os.environ["SHOPIFY_ACCESS_TOKEN"]
-LISTINGS_PER_RUN     = int(os.environ.get("LISTINGS_PER_RUN", "10"))
+LISTINGS_PER_RUN     = int(os.environ.get("LISTINGS_PER_RUN", "50"))
 DB_PATH              = os.environ.get("DB_PATH", "data/dropship.db")
 
 Path("data").mkdir(exist_ok=True)
@@ -103,7 +103,7 @@ def create_shopify_product(product: dict) -> str | None:
         "product": {
             "title": title,
             "body_html": body_html,
-            "vendor": "VibeFinds",
+            "vendor": "EdisonHaus",
             "product_type": product["niche"].title(),
             "tags": tags,
             "status": "active",
@@ -115,7 +115,7 @@ def create_shopify_product(product: dict) -> str | None:
                 "requires_shipping": True,
                 "taxable": True
             }],
-            "images": [{"src": product["image_url"]}] if product.get("image_url") else []
+            "images": [{"src": product["image_url"]}] if product.get("image_url") and "4a4a4a" not in product.get("image_url", "") and "placehold" not in product.get("image_url", "") else []
         }
     }
 
