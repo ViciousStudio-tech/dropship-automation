@@ -18,7 +18,7 @@ CJ_API_KEY        = os.environ.get("CJ_API_KEY", "")  # Format: CJUserNum@api@xx
 # Legacy (unused — CJ deprecated email/password auth in 2024)
 CJ_EMAIL          = os.environ.get("CJ_EMAIL", "")
 CJ_PASSWORD       = os.environ.get("CJ_PASSWORD", "")
-PRODUCTS_PER_RUN  = int(os.environ.get("PRODUCTS_PER_RUN", "20"))
+PRODUCTS_PER_RUN  = int(os.environ.get("PRODUCTS_PER_RUN", "50"))
 DB_PATH           = os.environ.get("DB_PATH", "data/dropship.db")
 
 Path("data").mkdir(exist_ok=True)
@@ -76,7 +76,7 @@ def cj_search_products(token: str | None, keyword: str, page: int = 1) -> list:
             params={
                 "keyword": keyword,
                 "pageNum": page,
-                "pageSize": 20,
+                "pageSize": 50,
             },
             timeout=15
         )
