@@ -24,6 +24,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CJ_API_KEY: ${{ secrets.CJ_API_KEY }}
           CJ_EMAIL: ${{ secrets.CJ_EMAIL }}
+          CJ_PASSWORD: ${{ secrets.CJ_PASSWORD }}
           PRODUCTS_PER_RUN: "20"
           MIN_SCORE: "6"
           DB_PATH: "data/dropship.db"
