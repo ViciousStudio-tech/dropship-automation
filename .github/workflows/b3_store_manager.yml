@@ -35,4 +35,5 @@ jobs:
           mkdir -p data
           git add -f data/dropship.db b3_store_heartbeat.json 2>/dev/null || true
           git diff --staged --quiet || git commit -m "B3 store manager run $(date +%Y-%m-%d) [skip ci]"
+          git pull --rebase origin main || true
           git push origin main || true
