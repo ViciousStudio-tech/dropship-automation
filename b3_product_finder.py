@@ -58,16 +58,40 @@ NICHES = [
 
 # ── CJ Auth ────────────────────────────────────────────────────────────────────
 def cj_auth() -> str | None:
-    try:
-        resp = requests.post(f"{CJ_BASE}/authentication/getAccessToken",
-            json={"email": CJ_EMAIL, "password": CJ_PASSWORD}, timeout=15)
-        data = resp.json()
-        if data.get("result") is True:
-            log.info("CJ auth: OK")
-            return data["data"]["accessToken"]
-        log.error(f"CJ auth failed: code={data.get('code')} msg={data.get('message')} email={CJ_EMAIL} pwd_len={len(CJ_PASSWORD)}")
-    except Exception as e:
-        log.error(f"CJ auth error: {e}")
+    """
+    CJ_API_KEY (the 44-char key) is the working password credential.
+    Retries on rate limit (CJ limits auth to 1 req/300s per account).
+    """
+    for retry in range(4):
+        try:
+            log.info(f"CJ auth try={retry+1} key_len={len(CJ_API_KEY)}")
+            resp = requests.post(f"{CJ_BASE}/authentication/getAccessToken",
+                json={"email": CJ_EMAIL, "password": CJ_API_KEY}, timeout=15)
+            data = resp.json()
+            if data.get("result") is True:
+                log.info("CJ auth: OK")
+                return data["data"]["accessToken"]
+            msg  = data.get("message", "")
+            code = data.get("code", 0)
+            log.warning(f"CJ auth failed: code={code} msg={msg}")
+            if "QPS" in msg or "limit" in msg.lower() or resp.status_code == 429:
+                wait = 90 * (retry + 1)
+                log.warning(f"Rate limited — sleeping {wait}s")
+                time.sleep(wait)
+                continue
+            # Try apiKey format as fallback on credential error
+            resp2 = requests.post(f"{CJ_BASE}/authentication/getAccessToken",
+                json={"apiKey": CJ_API_KEY}, timeout=15)
+            data2 = resp2.json()
+            if data2.get("result") is True:
+                log.info("CJ auth: OK (apiKey method)")
+                return data2["data"]["accessToken"]
+            log.error(f"CJ auth all methods failed: {data2.get('message')}")
+            return None
+        except Exception as e:
+            log.error(f"CJ auth error: {e}")
+            time.sleep(10)
+    log.error("CJ auth: exhausted retries")
     return None
 
 # ── CJ Product Search ──────────────────────────────────────────────────────────
