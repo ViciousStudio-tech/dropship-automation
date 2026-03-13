@@ -268,6 +268,7 @@ def main():
 
                 # Get real variant ID and cost from product detail
                 vid, cost = cj_get_variant_id(token, pid)
+                cost = float(cost) if cost else 0.0
                 time.sleep(0.5)
 
                 if not vid or cost <= 0:
@@ -280,7 +281,8 @@ def main():
                 skip  = ai.get("skip", True)
 
                 title = (product.get("productNameEn") or "")[:60]
-                log.info(f"  [{score}/10] {title} | cost=${cost:.2f} sell=${ai.get('sell_price',0):.2f} skip={skip}")
+                sell_display = float(ai.get('sell_price', 0) or 0)
+                log.info(f"  [{score}/10] {title} | cost=${cost:.2f} sell=${sell_display:.2f} skip={skip}")
 
                 if skip or score < MIN_SCORE:
                     continue
