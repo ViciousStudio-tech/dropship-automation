@@ -63,7 +63,7 @@ def cj_auth() -> str | None:
         if data.get("result") is True:
             log.info("CJ auth: OK")
             return data["data"]["accessToken"]
-        log.error(f"CJ auth failed: {data.get('message')}")
+        log.error(f"CJ auth failed: code={data.get('code')} msg={data.get('message')} email={CJ_EMAIL} key_len={len(CJ_API_KEY)}")
     except Exception as e:
         log.error(f"CJ auth error: {e}")
     return None
