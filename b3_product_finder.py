@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 # ── Config ─────────────────────────────────────────────────────────────────────
 CJ_EMAIL    = os.environ.get("CJ_EMAIL", "nicholas.jacksondesign@gmail.com")
 CJ_API_KEY  = os.environ.get("CJ_API_KEY", "")
+CJ_PASSWORD = os.environ.get("CJ_PASSWORD", CJ_API_KEY)  # account password for auth
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 DB_PATH     = os.environ.get("DB_PATH", "data/dropship.db")
 REPORT_DIR  = Path(os.environ.get("REPORT_DIR", "reports"))
@@ -58,12 +59,12 @@ NICHES = [
 def cj_auth() -> str | None:
     try:
         resp = requests.post(f"{CJ_BASE}/authentication/getAccessToken",
-            json={"email": CJ_EMAIL, "password": CJ_API_KEY}, timeout=15)
+            json={"email": CJ_EMAIL, "password": CJ_PASSWORD}, timeout=15)
         data = resp.json()
         if data.get("result") is True:
             log.info("CJ auth: OK")
             return data["data"]["accessToken"]
-        log.error(f"CJ auth failed: code={data.get('code')} msg={data.get('message')} email={CJ_EMAIL} key_len={len(CJ_API_KEY)}")
+        log.error(f"CJ auth failed: code={data.get('code')} msg={data.get('message')} email={CJ_EMAIL} pwd_len={len(CJ_PASSWORD)}")
     except Exception as e:
         log.error(f"CJ auth error: {e}")
     return None
