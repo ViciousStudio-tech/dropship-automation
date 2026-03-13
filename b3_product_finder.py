@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 # ── Config ─────────────────────────────────────────────────────────────────────
 CJ_EMAIL    = os.environ.get("CJ_EMAIL", "nicholas.jacksondesign@gmail.com")
 CJ_API_KEY  = os.environ.get("CJ_API_KEY", "")
+CJ_PASSWORD = os.environ.get("CJ_PASSWORD", CJ_API_KEY)  # workflow uses CJ_PASSWORD secret
 CJ_PASSWORD = os.environ.get("CJ_PASSWORD", CJ_API_KEY)  # account password for auth
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 DB_PATH     = os.environ.get("DB_PATH", "data/dropship.db")
