@@ -130,7 +130,7 @@ def create_shopify_product(product: dict) -> str | None:
             "status": "active",
             "variants": [{
                 "price": str(round(product["sell_price"], 2)),
-                "compare_at_price": str(round(product["sell_price"] * 1.3, 2)),
+                # compare_at_price removed — no fake sale badges
                 "inventory_management": None,
                 "fulfillment_service": "manual",
                 "requires_shipping": True,
