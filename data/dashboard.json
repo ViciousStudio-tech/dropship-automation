@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-03-13T16:31:11.124563",
+  "generated_at": "2026-03-13T17:28:41.938176",
   "overall_status": "ok",
   "errors": [],
   "warnings": [],
@@ -8,25 +8,25 @@
       "product_finder": {
         "status": "ok",
         "last_run": "2026-03-12T15:47:06.677371",
-        "age_hours": 24.7,
+        "age_hours": 25.7,
         "details": "success"
       },
       "store_manager": {
         "status": "ok",
         "last_run": "2026-03-13T08:31:01.466983",
-        "age_hours": 8.0,
+        "age_hours": 9.0,
         "details": "success"
       },
       "order_fulfiller": {
         "status": "ok",
-        "last_run": "2026-03-13T13:12:14.496972",
-        "age_hours": 3.3,
+        "last_run": "2026-03-13T16:49:39.693287",
+        "age_hours": 0.7,
         "details": "success"
       }
     },
     "shopify": {
       "status": "ok",
-      "product_count": 30,
+      "product_count": 3,
       "order_count": 0
     },
     "database": {
@@ -34,6 +34,11 @@
       "total": 30,
       "pending": 0,
       "listed": 30
+    },
+    "theme_drift": {
+      "status": "no_anthropic",
+      "checked": 0,
+      "removed": 0
     }
   }
 }
