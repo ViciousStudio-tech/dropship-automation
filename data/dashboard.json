@@ -1,28 +1,30 @@
 {
-  "generated_at": "2026-03-13T20:59:48.916598",
-  "overall_status": "warning",
-  "errors": [],
+  "generated_at": "2026-03-13T21:38:17.994985",
+  "overall_status": "error",
+  "errors": [
+    "product_finder: error: CJ auth failed"
+  ],
   "warnings": [
     "No products listed on Shopify yet"
   ],
   "modules": {
     "heartbeats": {
       "product_finder": {
-        "status": "ok",
-        "last_run": "2026-03-12T15:47:06.677371",
-        "age_hours": 29.2,
-        "details": "success"
+        "status": "error",
+        "last_run": "2026-03-13T21:27:32.353467",
+        "age_hours": 0.2,
+        "details": "error: CJ auth failed"
       },
       "store_manager": {
         "status": "ok",
         "last_run": "2026-03-13T08:31:01.466983",
-        "age_hours": 12.5,
+        "age_hours": 13.1,
         "details": "success"
       },
       "order_fulfiller": {
         "status": "ok",
         "last_run": "2026-03-13T20:41:49.799286",
-        "age_hours": 0.3,
+        "age_hours": 0.9,
         "details": "success"
       }
     },
