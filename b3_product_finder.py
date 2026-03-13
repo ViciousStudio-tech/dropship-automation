@@ -1,6 +1,6 @@
 """
 Business 3 — Dropship Product Finder (CJDropshipping)
-EdisonHaus theme: Warm Ambient Home Decor. Cozy, aesthetic, mood-driven home products. Edison bulbs, table lamps, LED lighting, fairy lights, throw pillows, blankets, candles, vases, wall art, woven baskets, decorative accents. All products must fit this theme.
+EdisonHaus theme: Warm Ambient Home Lighting & Decor. Warm, aesthetic, mood-driven home products anchored by lighting. Table lamps, pendant lights, LED strips, fairy lights, string lights, sunset lamps, galaxy projectors. Supporting products: wall art/prints, throw pillows, woven storage, candle holders, vases. Cozy, aesthetic, mood-driven home products. Edison bulbs, table lamps, LED lighting, fairy lights, throw pillows, blankets, candles, vases, wall art, woven baskets, decorative accents. All products must fit this theme.
 Every product must fit the brand. Off-theme products are rejected by AI scoring.
 Runs via GitHub Actions 2x/week.
 """
@@ -18,52 +18,57 @@ log = logging.getLogger(__name__)
 # Cozy, aesthetic, mood-driven home products. Edison bulbs, table lamps, LED lighting, fairy lights, throw pillows, blankets, candles, vases, wall art, woven baskets, decorative accents.
 # Generated: 2026-03-13T17:42:56.533845
 
+# -- Warm Ambient Home Lighting & Decor Theme (locked by phase3_pipeline_lockdown) --
+# Theme: Warm Ambient Home Lighting & Decor
+# Warm, aesthetic, mood-driven home products anchored by lighting. Table lamps, pendant lights, LED strips, fairy lights, string lights, sunset lamps, galaxy projectors. Supporting products: wall art/prints, throw pillows, woven storage, candle holders, vases.
+# Generated: 2026-03-13T18:10:10.730068
+
 NICHES = [
     {
-        "name": "ambient lighting",
-        "search_terms": ["table lamp", "Edison bulb", "fairy lights", "string lights", "LED strip light", "bedside lamp"],
-        "collection_id": 305043243082,
-        "collection_handle": "Ambient Lighting",
+        "name": "table & desk lamps",
+        "search_terms": ["table lamp", "desk lamp", "bedside lamp", "night light"],
+        "collection_id": 305043832906,
+        "collection_handle": "Table & Desk Lamps",
         "reject_keywords": ["car", "bicycle", "motorcycle", "earring", "jewelry", "pet", "baby", "gym", "sport", "industrial", "commercial"],
     },
     {
-        "name": "wall art & prints",
-        "search_terms": ["wall art", "canvas print", "poster frame", "wall hanging", "macrame wall"],
-        "collection_id": 305043275850,
-        "collection_handle": "Wall Art & Prints",
+        "name": "pendant & ceiling lights",
+        "search_terms": ["pendant light", "chandelier", "ceiling light", "hanging lamp"],
+        "collection_id": 305043865674,
+        "collection_handle": "Pendant & Ceiling Lights",
+        "reject_keywords": ["car", "motorcycle", "earring", "jewelry", "pet", "gym", "sport", "baby", "industrial"],
+    },
+    {
+        "name": "LED & ambient lighting",
+        "search_terms": ["LED strip light", "fairy lights", "string lights", "sunset lamp", "galaxy projector", "solar string lights"],
+        "collection_id": 305043898442,
+        "collection_handle": "LED & Ambient Lighting",
+        "reject_keywords": ["car", "motorcycle", "earring", "jewelry", "pet", "gym", "sport", "baby", "industrial"],
+    },
+    {
+        "name": "wall decor",
+        "search_terms": ["wall art canvas", "decorative painting", "wall hanging", "tapestry", "framed print"],
+        "collection_id": 305043931210,
+        "collection_handle": "Wall Decor",
         "reject_keywords": ["car", "motorcycle", "earring", "jewelry", "pet", "gym", "sport", "baby", "industrial"],
     },
     {
         "name": "cozy textiles",
-        "search_terms": ["throw pillow", "cozy blanket", "cushion cover", "knit throw", "woven throw"],
-        "collection_id": 305043308618,
+        "search_terms": ["throw pillow cover", "cushion cover", "decorative pillow"],
+        "collection_id": 305043963978,
         "collection_handle": "Cozy Textiles",
         "reject_keywords": ["car", "motorcycle", "earring", "jewelry", "pet", "gym", "sport", "baby", "industrial"],
     },
     {
-        "name": "decorative accents",
-        "search_terms": ["decorative vase", "candle holder", "scented candle", "wall clock", "ceramic figurine"],
-        "collection_id": 305043341386,
-        "collection_handle": "Decorative Accents",
-        "reject_keywords": ["car", "motorcycle", "earring", "jewelry", "pet", "gym", "sport", "baby", "industrial"],
-    },
-    {
-        "name": "home office",
-        "search_terms": ["desk lamp", "desk organizer", "monitor light bar", "bookend", "desk clock"],
-        "collection_id": 305043374154,
-        "collection_handle": "Home Office",
-        "reject_keywords": ["car", "motorcycle", "earring", "jewelry", "pet", "gym", "sport", "baby"],
-    },
-    {
-        "name": "storage & organization",
-        "search_terms": ["woven basket", "storage basket", "rattan basket", "shelf organizer", "decorative box"],
-        "collection_id": 305043406922,
-        "collection_handle": "Storage & Organization",
+        "name": "storage & accents",
+        "search_terms": ["woven basket", "candle holder", "decorative vase", "storage basket"],
+        "collection_id": 305043996746,
+        "collection_handle": "Storage & Accents",
         "reject_keywords": ["car", "motorcycle", "earring", "jewelry", "pet", "gym", "sport", "baby", "industrial"],
     },
 ]
 
-FEATURED_COLLECTION_ID = 305043243082  # Featured collection
+FEATURED_COLLECTION_ID = 305043832906  # Featured collection
 
 # ── CJDropshipping Auth ────────────────────────────────────────────────────────
 def cj_get_token() -> str | None:
@@ -137,10 +142,10 @@ def init_db() -> sqlite3.Connection:
 
 # ── Claude AI scoring ──────────────────────────────────────────────────────────
 BRAND_BRIEF = """
-EdisonHaus is a Shopify store selling warm, aesthetic home products.
-The brand vibe: Edison bulb warmth, cosy hygge living, organised minimalist spaces.
+EdisonHaus is a Shopify store selling warm, aesthetic home lighting and decor.
+The brand vibe: Edison bulb warmth, pendant light elegance, cozy ambient glow.
 The customer: 25-40, rents or owns their first home, cares about how their space looks and feels.
-Products must feel at home in a lifestyle Instagram post. Think soft textures, warm lighting, clean organisation.
+Products must feel at home in a lifestyle Instagram post. Think warm lighting, soft textures, clean organisation.
 """
 
 def ai_score_and_describe(client, product: dict, niche: dict) -> dict:
