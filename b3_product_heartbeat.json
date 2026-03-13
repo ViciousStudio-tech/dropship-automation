@@ -1,6 +1,6 @@
 {
   "module": "b3_product_finder",
-  "last_run": "2026-03-12T15:47:06.677371",
-  "products_found": 20,
-  "status": "success"
+  "last_run": "2026-03-13T21:25:24.184374",
+  "products_found": 0,
+  "status": "error: CJ auth failed"
 }
